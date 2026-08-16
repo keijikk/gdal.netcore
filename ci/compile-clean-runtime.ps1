@@ -134,10 +134,27 @@ Copy-Item -Force (Join-Path $vcpkgInstalled 'share\sqlite3\copyright') (Join-Pat
 Copy-Item -Force (Join-Path $vcpkgInstalled 'share\nlohmann-json\copyright') (Join-Path $runtimeRoot 'LICENSE-NLOHMANN-JSON.txt')
 
 $ogrInfo = Join-Path $runtimeRoot 'bin\ogrinfo.exe'
-$runtimePath = (Join-Path $runtimeRoot 'bin') + ';' + $env:PATH
-$formats = & { $env:PATH = $runtimePath; & $ogrInfo --formats }
-if ($LASTEXITCODE -ne 0) {
-    throw "ogrinfo --formats failed with exit code $LASTEXITCODE."
+$runtimeBin = Join-Path $runtimeRoot 'bin'
+$gdalData = Join-Path $runtimeRoot 'share\gdal'
+$projData = Join-Path $runtimeRoot 'share\proj'
+if (-not (Test-Path $ogrInfo -PathType Leaf)) {
+    throw "GDAL command-line verifier was not installed: $ogrInfo"
+}
+if (-not (Test-Path $gdalData -PathType Container)) {
+    throw "GDAL data directory was not installed: $gdalData"
+}
+if (-not (Test-Path $projData -PathType Container)) {
+    throw "PROJ data directory was not installed: $projData"
+}
+
+$env:PATH = $runtimeBin + ';' + $env:PATH
+$env:GDAL_DATA = $gdalData
+$env:PROJ_DATA = $projData
+$formats = & $ogrInfo --formats 2>&1 | Out-String
+$ogrInfoExitCode = $LASTEXITCODE
+Write-Host "ogrinfo --formats output:`n$formats"
+if ($ogrInfoExitCode -ne 0) {
+    throw "ogrinfo --formats failed with exit code $ogrInfoExitCode."
 }
 if ($formats -notmatch 'GeoJSON') {
     throw 'GeoJSON driver is not available in the runtime.'
