@@ -1,7 +1,12 @@
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
-$workRoot = Join-Path $repoRoot 'build-clean-runtime'
+$workRoot = if ($env:RUNNER_TEMP) {
+    Join-Path $env:RUNNER_TEMP 'gdal-clean-runtime'
+}
+else {
+    Join-Path $repoRoot 'build-clean-runtime'
+}
 $sourceRoot = Join-Path $workRoot 'source'
 $gdalSource = Join-Path $sourceRoot 'gdal'
 $projSource = Join-Path $sourceRoot 'proj'
@@ -28,7 +33,7 @@ function Clone-Release {
         [Parameter(Mandatory)] [string] $Tag,
         [Parameter(Mandatory)] [string] $Destination)
 
-    Invoke-External { git clone --depth 1 --branch $Tag $Repository $Destination }
+    Invoke-External { git clone -c core.longpaths=true --depth 1 --branch $Tag $Repository $Destination }
 }
 
 function Clone-Commit {
@@ -37,7 +42,7 @@ function Clone-Commit {
         [Parameter(Mandatory)] [string] $Commit,
         [Parameter(Mandatory)] [string] $Destination)
 
-    Invoke-External { git clone --filter=blob:none --no-checkout $Repository $Destination }
+    Invoke-External { git clone -c core.longpaths=true --filter=blob:none --no-checkout $Repository $Destination }
     Invoke-External { git -C $Destination fetch --depth 1 origin $Commit }
     Invoke-External { git -C $Destination checkout --detach FETCH_HEAD }
 }
