@@ -75,7 +75,7 @@ Clone-Commit 'https://github.com/microsoft/vcpkg.git' 'c3867e714dd3a51c272826eea
 
 Invoke-External { & (Join-Path $vcpkgRoot 'bootstrap-vcpkg.bat') '-disableMetrics' }
 Invoke-External {
-    & (Join-Path $vcpkgRoot 'vcpkg.exe') install 'sqlite3[tool]' 'nlohmann-json' --triplet x64-windows
+    & (Join-Path $vcpkgRoot 'vcpkg.exe') install 'sqlite3[tool]' 'nlohmann-json' expat 'arrow[core,parquet]' --triplet x64-windows
 }
 if (-not (Test-Path $sqliteExecutable -PathType Leaf)) {
     throw "vcpkg did not install sqlite3.exe at $sqliteExecutable."
@@ -100,20 +100,39 @@ Invoke-External {
 Invoke-External { cmake --build $projBuild --parallel }
 Invoke-External { cmake --install $projBuild }
 
-# These are GDAL's documented minimal-driver options. GeoJSON is built in;
-# DXF is the one required optional vector driver. GDAL uses its internal
-# mandatory libraries and the explicitly supplied PROJ dependency only.
+# This is the commercial-distribution clean profile. It enables only the
+# selected file formats and the explicit, license-audited dependencies they
+# require: SQLite3, Expat, and Apache Arrow/Parquet.
 Invoke-External {
     cmake -S $gdalSource -B $gdalBuild -G Ninja `
         "-DCMAKE_INSTALL_PREFIX=$runtimeRoot" `
-        "-DCMAKE_PREFIX_PATH=$projInstall" `
+        "-DCMAKE_PREFIX_PATH=$projInstall;$vcpkgInstalled" `
         "-DPROJ_DIR=$(Join-Path $projInstall 'lib\cmake\proj')" `
         -DCMAKE_BUILD_TYPE=Release `
         -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF `
         -DOGR_BUILD_OPTIONAL_DRIVERS=OFF `
         -DOGR_ENABLE_DRIVER_DXF=ON `
+        -DOGR_ENABLE_DRIVER_CSV=ON `
+        -DOGR_ENABLE_DRIVER_KML=ON `
+        -DOGR_ENABLE_DRIVER_GML=ON `
+        -DOGR_ENABLE_DRIVER_GPX=ON `
+        -DOGR_ENABLE_DRIVER_SQLITE=ON `
+        -DOGR_ENABLE_DRIVER_GPKG=ON `
+        -DOGR_ENABLE_DRIVER_MVT=ON `
+        -DOGR_ENABLE_DRIVER_FLATGEOBUF=ON `
+        -DOGR_ENABLE_DRIVER_OPENFILEGDB=ON `
+        -DOGR_ENABLE_DRIVER_PARQUET=ON `
+        -DGDAL_ENABLE_DRIVER_BMP=ON `
+        -DGDAL_ENABLE_DRIVER_GIF=ON `
+        -DGDAL_ENABLE_DRIVER_JPEG=ON `
+        -DGDAL_ENABLE_DRIVER_PNG=ON `
+        -DGDAL_ENABLE_DRIVER_MBTILES=ON `
         -DGDAL_USE_EXTERNAL_LIBS=OFF `
         -DGDAL_USE_INTERNAL_LIBS=ON `
+        -DGDAL_USE_EXPAT=ON `
+        -DGDAL_USE_SQLITE3=ON `
+        -DGDAL_USE_ARROW=ON `
+        -DGDAL_USE_PARQUET=ON `
         -DGDAL_USE_PROJ=ON `
         -DBUILD_TESTING=OFF `
         -DBUILD_CSHARP_BINDINGS=ON `
@@ -128,18 +147,19 @@ Invoke-External { cmake --install $gdalBuild }
 
 Copy-Item -Force (Join-Path $projInstall 'bin\*.dll') (Join-Path $runtimeRoot 'bin')
 Copy-Item -Recurse -Force (Join-Path $projInstall 'share\proj') (Join-Path $runtimeRoot 'share\proj')
-Copy-Item -Force (Join-Path $gdalSource 'LICENSE.TXT') (Join-Path $runtimeRoot 'LICENSE-GDAL.txt')
-Copy-Item -Force (Join-Path $projSource 'COPYING') (Join-Path $runtimeRoot 'LICENSE-PROJ.txt')
-Copy-Item -Force (Join-Path $vcpkgInstalled 'share\sqlite3\copyright') (Join-Path $runtimeRoot 'LICENSE-SQLITE3.txt')
-Copy-Item -Force (Join-Path $vcpkgInstalled 'share\nlohmann-json\copyright') (Join-Path $runtimeRoot 'LICENSE-NLOHMANN-JSON.txt')
+Copy-Item -Force (Join-Path $vcpkgInstalled 'bin\*.dll') (Join-Path $runtimeRoot 'bin')
 
-$ogrInfo = Join-Path $runtimeRoot 'bin\ogrinfo.exe'
+$licensesRoot = Join-Path $runtimeRoot 'licenses'
+New-Item -ItemType Directory -Force -Path $licensesRoot | Out-Null
+Copy-Item -Force (Join-Path $gdalSource 'LICENSE.TXT') (Join-Path $licensesRoot 'GDAL.txt')
+Copy-Item -Force (Join-Path $projSource 'COPYING') (Join-Path $licensesRoot 'PROJ.txt')
+Get-ChildItem -Path (Join-Path $vcpkgInstalled 'share') -Recurse -File -Filter copyright | ForEach-Object {
+    Copy-Item -Force $_.FullName (Join-Path $licensesRoot ("vcpkg-$($_.Directory.Name).txt"))
+}
+
 $runtimeBin = Join-Path $runtimeRoot 'bin'
 $gdalData = Join-Path $runtimeRoot 'share\gdal'
 $projData = Join-Path $runtimeRoot 'share\proj'
-if (-not (Test-Path $ogrInfo -PathType Leaf)) {
-    throw "GDAL command-line verifier was not installed: $ogrInfo"
-}
 if (-not (Test-Path $gdalData -PathType Container)) {
     throw "GDAL data directory was not installed: $gdalData"
 }
@@ -150,20 +170,59 @@ if (-not (Test-Path $projData -PathType Container)) {
 $env:PATH = $runtimeBin + ';' + $env:PATH
 $env:GDAL_DATA = $gdalData
 $env:PROJ_DATA = $projData
-$formats = & $ogrInfo --formats 2>&1 | Out-String
-$ogrInfoExitCode = $LASTEXITCODE
-Write-Host "ogrinfo --formats output:`n$formats"
-if ($ogrInfoExitCode -ne 0) {
-    throw "ogrinfo --formats failed with exit code $ogrInfoExitCode."
-}
-if ($formats -notmatch 'GeoJSON') {
-    throw 'GeoJSON driver is not available in the runtime.'
-}
-if ($formats -notmatch 'DXF') {
-    throw 'DXF driver is not available in the runtime.'
+
+function Get-Formats {
+    param([Parameter(Mandatory)] [string] $Program)
+
+    if (-not (Test-Path $Program -PathType Leaf)) {
+        throw "GDAL command-line verifier was not installed: $Program"
+    }
+
+    $formats = & $Program --formats 2>&1 | Out-String
+    $exitCode = $LASTEXITCODE
+    Write-Host "$([IO.Path]::GetFileName($Program)) --formats output:`n$formats"
+    if ($exitCode -ne 0) {
+        throw "$([IO.Path]::GetFileName($Program)) --formats failed with exit code $exitCode."
+    }
+
+    return $formats
 }
 
-$forbidden = 'poppler|mysql|geos|pdfium|openjpeg|hdf|netcdf|arrow|spatialite'
+function Assert-RegisteredFormats {
+    param(
+        [Parameter(Mandatory)] [string] $Formats,
+        [Parameter(Mandatory)] [string[]] $Required,
+        [Parameter(Mandatory)] [string] $ProgramName)
+
+    $missing = $Required | Where-Object { $Formats -notmatch ([Regex]::Escape($_) + '\s+-') }
+    if ($missing) {
+        throw "$ProgramName is missing required formats: $($missing -join ', ')"
+    }
+}
+
+$vectorFormats = Get-Formats (Join-Path $runtimeBin 'ogrinfo.exe')
+Assert-RegisteredFormats $vectorFormats @(
+    'GeoJSON', 'GeoJSONSeq', 'TopoJSON', 'ESRIJSON', 'DXF', 'ESRI Shapefile',
+    'CSV', 'KML', 'GML', 'GPX', 'SQLite', 'GPKG', 'MVT', 'FlatGeobuf',
+    'OpenFileGDB', 'Parquet'
+) 'ogrinfo'
+
+$rasterFormats = Get-Formats (Join-Path $runtimeBin 'gdalinfo.exe')
+Assert-RegisteredFormats $rasterFormats @(
+    'VRT', 'GTiff', 'COG', 'BMP', 'GIF', 'JPEG', 'PNG', 'MBTiles'
+) 'gdalinfo'
+
+$csharpBindings = Join-Path $runtimeRoot 'share\csharp'
+$requiredCsharpFiles = @(
+    'gdalconst_csharp.dll', 'osr_csharp.dll', 'ogr_csharp.dll', 'gdal_csharp.dll',
+    'gdalconst_wrap.dll', 'osr_wrap.dll', 'ogr_wrap.dll', 'gdal_wrap.dll'
+)
+$missingCsharpFiles = $requiredCsharpFiles | Where-Object { -not (Test-Path (Join-Path $csharpBindings $_) -PathType Leaf) }
+if ($missingCsharpFiles) {
+    throw "C# bindings are missing from the runtime: $($missingCsharpFiles -join ', ')"
+}
+
+$forbidden = 'poppler|mysql|geos|pdfium|openjpeg|hdf|netcdf|spatialite'
 $forbiddenFiles = Get-ChildItem -Path $runtimeRoot -Recurse -File | Where-Object { $_.Name -match $forbidden }
 if ($forbiddenFiles) {
     throw "The clean runtime contains excluded dependencies: $($forbiddenFiles.Name -join ', ')"
