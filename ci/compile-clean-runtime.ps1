@@ -17,6 +17,7 @@ $projInstall = Join-Path $workRoot 'proj-install'
 $gdalBuild = Join-Path $workRoot 'gdal-build'
 $runtimeRoot = Join-Path $workRoot 'runtime'
 $outRoot = Join-Path $repoRoot 'out'
+$sqliteExecutable = Join-Path $vcpkgInstalled 'tools\sqlite3.exe'
 
 function Invoke-External {
     param([Parameter(Mandatory)] [scriptblock] $Command)
@@ -76,6 +77,9 @@ Invoke-External { & (Join-Path $vcpkgRoot 'bootstrap-vcpkg.bat') '-disableMetric
 Invoke-External {
     & (Join-Path $vcpkgRoot 'vcpkg.exe') install 'sqlite3[tool]' 'nlohmann-json' --triplet x64-windows
 }
+if (-not (Test-Path $sqliteExecutable -PathType Leaf)) {
+    throw "vcpkg did not install sqlite3.exe at $sqliteExecutable."
+}
 
 # PROJ's documented source-build requirements are SQLite and nlohmann/json.
 # Network and GeoTIFF support are intentionally excluded from this first,
@@ -84,7 +88,7 @@ Invoke-External {
     cmake -S $projSource -B $projBuild -G Ninja `
         "-DCMAKE_INSTALL_PREFIX=$projInstall" `
         "-DCMAKE_PREFIX_PATH=$vcpkgInstalled" `
-        "-DEXE_SQLITE3=$(Join-Path $vcpkgInstalled 'tools\sqlite3\sqlite3.exe')" `
+        "-DEXE_SQLITE3=$sqliteExecutable" `
         -DCMAKE_BUILD_TYPE=Release `
         -DBUILD_SHARED_LIBS=ON `
         -DBUILD_APPS=OFF `
