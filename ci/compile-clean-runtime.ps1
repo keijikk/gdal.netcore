@@ -115,10 +115,13 @@ Invoke-External {
         -DGDAL_USE_EXTERNAL_LIBS=OFF `
         -DGDAL_USE_INTERNAL_LIBS=ON `
         -DGDAL_USE_PROJ=ON `
+        -DBUILD_TESTING=OFF `
         -DBUILD_CSHARP_BINDINGS=ON `
         -DGDAL_CSHARP_APPS=OFF `
         -DGDAL_CSHARP_TESTS=OFF `
-        -DGDAL_CSHARP_BUILD_NUPKG=OFF
+        -DGDAL_CSHARP_BUILD_NUPKG=OFF `
+        -DBUILD_PYTHON_BINDINGS=OFF `
+        -DBUILD_JAVA_BINDINGS=OFF
 }
 Invoke-External { cmake --build $gdalBuild --parallel }
 Invoke-External { cmake --install $gdalBuild }
