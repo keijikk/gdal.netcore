@@ -75,7 +75,7 @@ Clone-Commit 'https://github.com/microsoft/vcpkg.git' 'c3867e714dd3a51c272826eea
 
 Invoke-External { & (Join-Path $vcpkgRoot 'bootstrap-vcpkg.bat') '-disableMetrics' }
 Invoke-External {
-    & (Join-Path $vcpkgRoot 'vcpkg.exe') install 'sqlite3[tool]' 'nlohmann-json' expat 'arrow[core,parquet]' --triplet x64-windows
+    & (Join-Path $vcpkgRoot 'vcpkg.exe') install 'sqlite3[tool,rtree]' 'nlohmann-json' expat 'arrow[core,parquet]' --triplet x64-windows
 }
 if (-not (Test-Path $sqliteExecutable -PathType Leaf)) {
     throw "vcpkg did not install sqlite3.exe at $sqliteExecutable."
