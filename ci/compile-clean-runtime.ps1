@@ -47,7 +47,24 @@ function Clone-Commit {
     Invoke-External { git -C $Destination checkout --detach FETCH_HEAD }
 }
 
+function Initialize-Msvc {
+    $vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    $vsInstall = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if (-not $vsInstall) {
+        throw 'A Visual Studio C++ toolchain was not found.'
+    }
+
+    $vsDevCmd = Join-Path $vsInstall 'Common7\Tools\VsDevCmd.bat'
+    $environment = cmd.exe /c "`"$vsDevCmd`" -arch=x64 -host_arch=x64 >nul && set"
+    foreach ($entry in $environment) {
+        if ($entry -match '^(.*?)=(.*)$') {
+            [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+        }
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $sourceRoot, $outRoot | Out-Null
+Initialize-Msvc
 
 # GDAL 3.13.2 is the current stable release. PROJ 9.8.1 is its current
 # stable companion. Both are built from their official source repositories.
@@ -64,10 +81,11 @@ Invoke-External {
 # Network and GeoTIFF support are intentionally excluded from this first,
 # license-auditable runtime profile.
 Invoke-External {
-    cmake -S $projSource -B $projBuild -G 'Visual Studio 17 2022' -A x64 `
+    cmake -S $projSource -B $projBuild -G Ninja `
         "-DCMAKE_INSTALL_PREFIX=$projInstall" `
         "-DCMAKE_PREFIX_PATH=$vcpkgInstalled" `
         "-DEXE_SQLITE3=$(Join-Path $vcpkgInstalled 'tools\sqlite3\sqlite3.exe')" `
+        -DCMAKE_BUILD_TYPE=Release `
         -DBUILD_SHARED_LIBS=ON `
         -DBUILD_APPS=OFF `
         -DBUILD_TESTING=OFF `
@@ -75,17 +93,18 @@ Invoke-External {
         -DENABLE_TIFF=OFF `
         -DEMBED_PROJ_DATA_PATH=OFF
 }
-Invoke-External { cmake --build $projBuild --config Release --parallel }
-Invoke-External { cmake --install $projBuild --config Release }
+Invoke-External { cmake --build $projBuild --parallel }
+Invoke-External { cmake --install $projBuild }
 
 # These are GDAL's documented minimal-driver options. GeoJSON is built in;
 # DXF is the one required optional vector driver. GDAL uses its internal
 # mandatory libraries and the explicitly supplied PROJ dependency only.
 Invoke-External {
-    cmake -S $gdalSource -B $gdalBuild -G 'Visual Studio 17 2022' -A x64 `
+    cmake -S $gdalSource -B $gdalBuild -G Ninja `
         "-DCMAKE_INSTALL_PREFIX=$runtimeRoot" `
         "-DCMAKE_PREFIX_PATH=$projInstall" `
         "-DPROJ_DIR=$(Join-Path $projInstall 'lib\cmake\proj')" `
+        -DCMAKE_BUILD_TYPE=Release `
         -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF `
         -DOGR_BUILD_OPTIONAL_DRIVERS=OFF `
         -DOGR_ENABLE_DRIVER_DXF=ON `
@@ -97,8 +116,8 @@ Invoke-External {
         -DGDAL_CSHARP_TESTS=OFF `
         -DGDAL_CSHARP_BUILD_NUPKG=OFF
 }
-Invoke-External { cmake --build $gdalBuild --config Release --parallel }
-Invoke-External { cmake --install $gdalBuild --config Release }
+Invoke-External { cmake --build $gdalBuild --parallel }
+Invoke-External { cmake --install $gdalBuild }
 
 Copy-Item -Force (Join-Path $projInstall 'bin\*.dll') (Join-Path $runtimeRoot 'bin')
 Copy-Item -Recurse -Force (Join-Path $projInstall 'share\proj') (Join-Path $runtimeRoot 'share\proj')

@@ -18,9 +18,9 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Install SWIG
+      - name: Install build tools
         shell: pwsh
-        run: choco install swig --yes --no-progress
+        run: choco install swig ninja --yes --no-progress
 
       - name: Build and verify runtime
         shell: pwsh
