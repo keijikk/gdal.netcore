@@ -31,13 +31,24 @@ function Clone-Release {
     Invoke-External { git clone --depth 1 --branch $Tag $Repository $Destination }
 }
 
+function Clone-Commit {
+    param(
+        [Parameter(Mandatory)] [string] $Repository,
+        [Parameter(Mandatory)] [string] $Commit,
+        [Parameter(Mandatory)] [string] $Destination)
+
+    Invoke-External { git clone --filter=blob:none --no-checkout $Repository $Destination }
+    Invoke-External { git -C $Destination fetch --depth 1 origin $Commit }
+    Invoke-External { git -C $Destination checkout --detach FETCH_HEAD }
+}
+
 New-Item -ItemType Directory -Force -Path $sourceRoot, $outRoot | Out-Null
 
 # GDAL 3.13.2 is the current stable release. PROJ 9.8.1 is its current
 # stable companion. Both are built from their official source repositories.
 Clone-Release 'https://github.com/OSGeo/gdal.git' 'v3.13.2' $gdalSource
 Clone-Release 'https://github.com/OSGeo/PROJ.git' '9.8.1' $projSource
-Clone-Release 'https://github.com/microsoft/vcpkg.git' '2026.03.18' $vcpkgRoot
+Clone-Commit 'https://github.com/microsoft/vcpkg.git' 'c3867e714dd3a51c272826eea77267876517ed99' $vcpkgRoot
 
 Invoke-External { & (Join-Path $vcpkgRoot 'bootstrap-vcpkg.bat') '-disableMetrics' }
 Invoke-External {
